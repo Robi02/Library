@@ -44,7 +44,7 @@ public class KsLoggerConfig {
     }
 
     public void setLoggerSyncMode(int loggerSyncMode) {
-        if (loggerSyncMode != LOGGER_MODE_SYNC || loggerSyncMode != LOGGER_MODE_ASYNC) {
+        if (loggerSyncMode != LOGGER_MODE_SYNC && loggerSyncMode != LOGGER_MODE_ASYNC) {
             loggerSyncMode = LOGGER_MODE_DEFAULT;
         }
 

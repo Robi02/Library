@@ -41,24 +41,76 @@ public class KsLogWriter {
     // - Log formatter
     private KsLogFormatter logFormatter;
     // - Log writer stream
-    private KsLogMsg writeLogMsg = null;
     private boolean requireWriterRefresh = true;
     private File logDir = null;
     private File logFile = null;
     private BufferedWriter logBufWriter = null;
     private OutputStreamWriter logOsWriter = null;
     private FileOutputStream fileOutputStream = null;
+    // - Aync mode watcher class
+    private KsLogStorage logStorage = null;
+    private KsLogWriterWatcher watcherRunnable = null;
+    private Thread watcherThread = null;
+
+    private class KsLogWriterWatcher implements Runnable {
+
+        public boolean running;
+        public long lastWriteTime;
+
+        public KsLogWriterWatcher() {
+            this.running = false;
+            this.lastWriteTime = System.currentTimeMillis();
+        }
+
+        @Override
+        public void run() {
+            this.running = true;
+
+            while (this.running) {
+                long curTime = System.currentTimeMillis();
+                KsLogMsg logMsg = null;
+
+                try {
+                    if ((logMsg = logStorage.getLogFromStorage()) == null) {
+                        if (curTime - this.lastWriteTime > 1000) {
+                            Thread.sleep(1); // prevent watcher thread's overdrive
+                        }
+
+                        continue;
+                    }
+
+                    this.lastWriteTime = curTime;
+                    tryLogWriting(logMsg);
+                }
+                catch (Exception e) {
+                    System.out.println("LogWriterWatcher : Exception caused!");
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
 
     // [Constructor]
     public KsLogWriter() {}
 
     // [Public methods]
     // Initalizer
-    public boolean initialize(KsLoggerConfig customConfig) {
+    public boolean initialize(KsLoggerConfig customConfig, KsLogStorage logStorage,
+                                KsLogFormatter logFormatter) {
         // - Logger config
         this.loggerConfig = customConfig;
+        // - Log Storage
+        this.logStorage = logStorage;
+        // - Log Formatter
+        this.logFormatter = logFormatter;
         // - Log writer stream
         this.requireWriterRefresh = true;
+        // - Log Watcher
+        if (customConfig.getLoggerSyncMode() == KsLoggerConfig.LOGGER_MODE_ASYNC) {
+            this.watcherRunnable = new KsLogWriterWatcher();
+            this.watcherThread = new Thread(watcherRunnable);
+            this.watcherThread.start();
+        }
 
         return (this.initialized = true);
     }
@@ -70,20 +122,27 @@ public class KsLogWriter {
         this.logDir = null;
         this.logFile = null;
         closeWriterResoruces();
+        this.logStorage = null;
+        this.logFormatter = null;
+        if (this.watcherRunnable != null && this.watcherRunnable.running) {
+            this.watcherRunnable.running = false;
+        }
+        this.watcherRunnable = null;
     }
 
-    // 
-    public synchronized boolean tryLogWriting(long timeStamp, int level, String message) {
-        // LogMsgClass Setting
-        if (writeLogMsg == null) {
-            writeLogMsg = new KsLogMsg(timeStamp, level, message);
+    // This method is ONLY way to write log
+    public synchronized boolean tryLogWriting(KsLogMsg logMsg) {
+        if (logMsg == null) {
+            return true;
         }
-        else {
-            writeLogMsg.set(timeStamp, level, message);
+
+        // If log message not formatted, do formatting
+        if (logMsg.getMessage() == null) {
+            logMsg.setMessage(this.logFormatter.makeFormattedMessage(logMsg));
         }
 
         // Writing and return result
-        return writeLog(writeLogMsg.getMessage());
+        return writeLog(logMsg.getMessage());
     }
     
     // [Private methods]

@@ -7,7 +7,7 @@ public class TestB {
     private static final KsLogger _ksLogger = KsLogger.getLogger(
         "TestB_logger",                             // Logger ID
         new KsLoggerConfig(
-            KsLoggerConfig.LOGGER_MODE_SYNC,        // Sync/Async mode
+            KsLoggerConfig.LOGGER_MODE_ASYNC,       // Sync/Async mode
             KsLoggerConfig.LOGGER_OUTPUT_FILE,      // Sysout/File
             null,                                   // Default charset
             "./rb_logs",                            // Directory
@@ -20,6 +20,7 @@ public class TestB {
     private static Random Rand = new Random();
 
     public static void log(int logType, Object... logObjs) {
+        /*
         String wtId = "000";
 		StackTraceElement[] stkTraceElem = new Throwable().getStackTrace();
 		Object[] newLogObjs = new Object[logObjs.length + 2];
@@ -54,7 +55,7 @@ public class TestB {
 		// 생성 해더 1,2를 대입
 		newLogObjs[0] = logHeader1;
 		newLogObjs[1] = logHeaderSb2.toString();
-		logHeaderSb2.setLength(0);
+		logHeaderSb2.setLength(0);*/
 
         // 로그 출력
         /* old version logger
@@ -62,7 +63,9 @@ public class TestB {
         */
 
         /* ks logger */
-        _ksLogger.log(logType, newLogObjs);
+        if (!_ksLogger.log(logType, logObjs)) {
+            System.out.println("Logger return false!");
+        }
     }
 
     public static void ex1() {
@@ -145,8 +148,8 @@ public class TestB {
         }
     }
 
-    private static int TestWorkCnt = 100;
-    private static int TestThreadCnt = 1000;
+    private static int TestWorkCnt = 2000;
+    private static int TestThreadCnt = 500;
     private static int TestThreadDelay = 0;
     
     public static void main(String[] args) {
@@ -180,7 +183,14 @@ public class TestB {
             }
 
             long elapsedTime = System.currentTimeMillis() - startTime;
-            System.out.println("- Done!");
+            System.out.println("- Thread Works Done!");
+            System.out.println("> Time Elapsed : " + (elapsedTime / 1000.0) + "ms");
+            System.out.println("> Log per Sec : " + (TestThreadCnt * TestWorkCnt) / (elapsedTime / 1000.0) + "/sec");
+
+            while (_ksLogger.isLoggerWorking()) {}
+
+            elapsedTime = System.currentTimeMillis() - startTime;
+            System.out.println("- Logger Done!");
             System.out.println("> Time Elapsed : " + (elapsedTime / 1000.0) + "ms");
             System.out.println("> Log per Sec : " + (TestThreadCnt * TestWorkCnt) / (elapsedTime / 1000.0) + "/sec");
             break;

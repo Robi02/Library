@@ -5,19 +5,19 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  *  < 1. Async mode - LOW reliable vs HIGH performance >
- *                                                               +[WriteResult]+
- *                                                               V             |
- *    +--------------+             +-----------------+      +---------+-----+-----+           +-[Console]----------+
- *  | | < Thread A > |             | Log    +------+ |      |   Log   | Log | Log | [ConMode] |[ymd hms] [I] - ABC |
- *  | | Log("ABC");  | -[RawLog]-> |  S  -> | Heap | | -+-> |    W    |  F  |  W  | --[Log]-> |[ymd hms] [I] - 123 |
- *  | | add(a, b);   |             |  T     +------+ |  |   |    R    |  O  |  R  | <-[Rst]-- |[ymd hms] [I] - abc |
- *  V | Log("abc");  | -[RawLog]-> |  O  -> | Heap | | -+   |    I    |  R  |  I  |           +--------------------+
- *    |--------------+             |  R     +------+ |  |   |    T    |  M  |  T  |           +-[pre.yyyymmdd.log]-+
- *  | | < Thread B > |             |  A  -> | .... | | -+   |    E    |  A  |  E  | [FileMod] |[ymd hms] [I] - ABC |
- *  | | Log("123");  | -[RawLog]-> |  G     +------+ |      |    R    |  T  |  R  | --[Log]-> |[ymd hms] [I] - 123 |
- *  V | Log("...");  | -[RawLog]-> |  E     (N-Heap) |      |(Watcher)| TER |     | <-[Rst]-- |[ymd hms] [I] - abc |
- *    +--------------+             +-----------------+      +---------+-----+-----+           +--------------------+
- *    [ Work Threads ]             [                   KsLogger                   ]           [ Output Log Message ]
+ *                                                              +--[WriteResult]--+
+ *                                                              V                 |
+ *    +--------------+             +-----------------+      +-------------------+ |             +-[Console]----------+
+ *  | | < Thread A > |             | Log    +------+ |      |    Log WRITER     | |  [ConMode]  |[ymd hms] [I] - ABC |
+ *  | | Log("ABC");  | -[RawLog]-> |  S  -> | Heap | | -+   | +---------------+ | | +---[Log]-> |[ymd hms] [I] - 123 |
+ *  | | add(a, b);   |             |  T     +------+ |  O---|>| WatcherThread | | +-|---[Rst]-- |[ymd hms] [I] - abc |
+ *  V | Log("abc");  | -[RawLog]-> |  O  -> | Heap | | -+   | +---------------+ | | |           +--------------------+
+ *    |--------------+             |  R     +------+ |  |   |         V         | | |           +-[pre.yyyymmdd.log]-+
+ *  | | < Thread B > |             |  A  -> | .... | | -+   | +---------------+ | | | [FileMod] |[ymd hms] [I] - ABC |
+ *  | | Log("123");  | -[RawLog]-> |  G     +------+ |      | | Log FORMATTER |-|-|-+---[Log]-> |[ymd hms] [I] - 123 |
+ *  V | Log("...");  | -[RawLog]-> |  E     (N-Heap) |      | +---------------+ | +-----[Rst]-- |[ymd hms] [I] - abc |
+ *    +--------------+             +-----------------+      +-------------------+               +--------------------+
+ *    [ Work Threads ]             [                   KsLogger                   ]             [ Output Log Message ]
  * 
  * - Work thread will add log message into 'Log Storage' and move immediately to next logic
  * - Writer has 'own thread' to read log message from 'LogStorage' then write into file
@@ -90,6 +90,7 @@ public class KsLogger {
     }
 
     // [Public methods]
+    // Get initialized instance
     public static KsLogger getLogger(String loggerId, KsLoggerConfig customConfig) {
         if (loggerId == null) {
             return null;
@@ -115,6 +116,17 @@ public class KsLogger {
         }
 
         return rtLogger;
+    }
+
+    // Check logger is working or not (for async mode)
+    public boolean isLoggerWorking() {
+        if (this.loggerConfig.getLoggerSyncMode() == KsLoggerConfig.LOGGER_MODE_ASYNC) {
+            if (this.logStorage.getStoredLogCount() == 0) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Logger destroyer
@@ -149,20 +161,21 @@ public class KsLogger {
             }
 
             int logSyncMode = this.loggerConfig.getLoggerSyncMode();
+            KsLogMsg logMsg = new KsLogMsg(curTime, level, msgObjs, null);
 
             if (logSyncMode == KsLoggerConfig.LOGGER_MODE_SYNC) {
                 String message = null;
             
-                if ((message = this.logFormatter.makeFormattedMessage(curTime, level, msgObjs)) == null) {
+                if ((message = this.logFormatter.makeFormattedMessage(logMsg)) == null) {
                     System.out.println("Logger : Formatter returns null!");
                     return false;
                 }
 
                 // Bottleneck of sync mode (synchronized method)
-                return this.logWriter.tryLogWriting(curTime, level, message);
+                return this.logWriter.tryLogWriting(logMsg);
             }
             else if (logSyncMode == KsLoggerConfig.LOGGER_MODE_ASYNC) {
-                return true; // this.logStorage.pushLogMsg();
+                return this.logStorage.putIntoStorage(logMsg);
             }
             else {
                 System.out.println("Logger : Undefined 'logSyncMode(" + logSyncMode + ")'!");
@@ -204,7 +217,7 @@ public class KsLogger {
                 this.logWriter = new KsLogWriter();
             }
 
-            if (!this.logWriter.initialize(customConfig)) {
+            if (!this.logWriter.initialize(customConfig, this.logStorage, this.logFormatter)) {
                 System.out.println("Logger : LogWriter Initialize FAILED!");
                 return false;
             }

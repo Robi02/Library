@@ -43,13 +43,14 @@ public class KsLogFormatter {
     }
 
     // Formatter
-    public String makeFormattedMessage(long timeStamp, int level, Object... logObjs) {
+    public String makeFormattedMessage(KsLogMsg logMsg) {
         if (!this.initialized) {
             System.out.println("LogFormatter : Formatter NOT Initialized!");
             return null;
         }
 
         // TimestampStr
+        long timeStamp = logMsg.getTimeStamp();
         String timeStampStr = null;
         
         if ((timeStampStr = makeTimestampStr(timeStamp)) == null) { // synchornized work
@@ -57,16 +58,17 @@ public class KsLogFormatter {
         }
         
         // LogLevelStr
-        String levelStr = makeLevelStr(level);
+        String levelStr = makeLevelStr(logMsg.getLevel());
         
         // Make 'msgStr' (Object[] to String)
-        String msgStr = makeObjectAryToString(logObjs);
+        String msgStr = makeObjectAryToString(logMsg.getLogObjAry());
 
-        // Fmt: [yyyy-MM-hh HH:mm:ss] [levelStr] [TID:tid] (msgStr)
-        // Ex): [2019-05-03 13:18:10] [INFO ] [TID:123] Hello Logger!
+        // Fmt: [yyyy-MM-hh HH:mm:ss] [levelStr] [ThreadName] (msgStr)
+        // Ex): [2019-05-03 13:18:10] [INFO ] [Thread-0] Hello Logger!
         StringBuilder msgSb = new StringBuilder();
         return msgSb.append(STR_BRACKET_L).append(timeStampStr).append(STR_BRACKET_R).append(STR_BLANK)
                     .append(STR_BRACKET_L).append(levelStr).append(STR_BRACKET_R).append(STR_BLANK)
+                    .append(STR_BRACKET_L).append(Thread.currentThread().getName()).append(STR_BRACKET_R).append(STR_BLANK)
                     .append(msgStr).toString();
     }
 
@@ -78,8 +80,8 @@ public class KsLogFormatter {
         synchronized (this) {
             // when exactly 60sec blokcing happend, that could make 'past timestamp' return issue
             // ex) Correct: "yyyy-MM-dd HH:11:00" -> Return: "yyyy-MM-dd HH:10:00"
-            if (timeSec != lastSec || cachedDateStr == null) { 
-                cachedDateStr = simpleDateFmt.format(timeStamp);
+            if (timeSec != lastSec || cachedDateStr == null) {
+                cachedDateStr = simpleDateFmt.format(timeStamp); // SimpleDateFormat is NOT thread-safe!
                 lastSec = timeSec;
             }
             
