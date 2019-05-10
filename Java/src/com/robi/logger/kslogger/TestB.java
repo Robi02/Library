@@ -148,8 +148,8 @@ public class TestB {
         }
     }
 
-    private static int TestWorkCnt = 2000;
-    private static int TestThreadCnt = 500;
+    private static int TestWorkCnt = 20000;
+    private static int TestThreadCnt = 50;
     private static int TestThreadDelay = 0;
     
     public static void main(String[] args) {

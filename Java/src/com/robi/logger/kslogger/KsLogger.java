@@ -12,18 +12,18 @@ import java.util.concurrent.ConcurrentMap;
  *  | | Log("ABC");  | -[RawLog]-> |  S  -> | Heap | | -+   | +---------------+ | | +---[Log]-> |[ymd hms] [I] - 123 |
  *  | | add(a, b);   |             |  T     +------+ |  O---|>| WatcherThread | | +-|---[Rst]-- |[ymd hms] [I] - abc |
  *  V | Log("abc");  | -[RawLog]-> |  O  -> | Heap | | -+   | +---------------+ | | |           +--------------------+
- *    |--------------+             |  R     +------+ |  |   |         V         | | |           +-[pre.yyyymmdd.log]-+
+ *    |--------------+             |  R     +------+ |  |   |         V         | | |           +-[File]-------------+
  *  | | < Thread B > |             |  A  -> | .... | | -+   | +---------------+ | | | [FileMod] |[ymd hms] [I] - ABC |
  *  | | Log("123");  | -[RawLog]-> |  G     +------+ |      | | Log FORMATTER |-|-|-+---[Log]-> |[ymd hms] [I] - 123 |
  *  V | Log("...");  | -[RawLog]-> |  E     (N-Heap) |      | +---------------+ | +-----[Rst]-- |[ymd hms] [I] - abc |
  *    +--------------+             +-----------------+      +-------------------+               +--------------------+
- *    [ Work Threads ]             [                   KsLogger                   ]             [ Output Log Message ]
+ *    [ Work Threads ]             [                  KsLogger                  ]               [ Output Log Message ]
  * 
  * - Work thread will add log message into 'Log Storage' and move immediately to next logic
- * - Writer has 'own thread' to read log message from 'LogStorage' then write into file
+ * - Writer has 'own thread'(as named as watcher) to read log message from 'LogStorage' then write into file
  * - Log messag can be lossed when logger has faced critical problem like 'system shutdown', 'overdrive'
  *   , 'file I/O problem' and 'thread starvation/livelock' (etc...)
- * - The time trying to write log is always correct but, real time written into file can be different
+ * - The time trying to write log is always correct but, the 'real time' written into file can be different
  * 
  * 
  *  < 2. Sync mode - LOW performance vs HIGH reliable >
@@ -35,18 +35,41 @@ import java.util.concurrent.ConcurrentMap;
  * +- | Log("ABC");  |            |   |  F  |           |    |  W  | --[Log]-> |[ymd hms] [I] - 123 |
  * |  | add(a, b);   | <-[Result]-+   |  O  |           O--> |  R  | <-[Rst]-- |                    |
  * +- | Log("abc");  |            |   |  R  |           |    |  I  |           +--------------------+
- * V  |--------------+            |   |  M  |           |    |  T  |           +-[pre.yyyymmdd.log]-+
+ * V  |--------------+            |   |  M  |           |    |  T  |           +-[File]-------------+
  *    | < Thread B > | -[RawLog]--|-> |  A  | --[Log]---+    |  E  | [FileMod] |[ymd hms] [I] - ABC |
  * +- | Log("123");  |            |   |  T  |                |  R  | --[Log]-> |[ymd hms] [I] - 123 |
- * |- | Log("...");  | <-[Result]-+   | TER |  (Bottlenect)  |     | <-[Rst]-- |                    |
+ * |- | Log("...");  | <-[Result]-+   | TER |                |     | <-[Rst]-- |                    |
  * V  +--------------+                +-----+                +-----+           +--------------------+
  *    [ Work Threads ]                [          KsLogger          ]           [ Output Log Message ]
  * 
- * - Log message will add into 'Log Writter' then write info file ('Log Writer' doesn't have own thread)
- * - Work thread will be blocked until log writing be totally completed
- * - When log requests are overdrive, all logic will be halted because spend all time to write log file
+ * - Log message will add directly into 'Log Writter' then write info file (in this case, 'Log Writer' doesn't have own thread)
+ * - Work thread will be blocked until log writing be totally completed and return write result
+ * - When log requests are extreamly overdrive, all logic will be halted because system spend almost time to write log file
  * 
  */
+
+/**
+ *  [ Test Case #1 (50-Thread, 1000000-Log) ]
+ *  - async mode (1-Heap)
+ *   > Insertion time (async): 2.342s / 426,985LPS (Log Per Second)
+ *   > Write end time (async): 22.181s / 43,896LPS
+ *  - sync mode
+ *   > Insertion/Write end time (sync): 29.584s / 33,802LPS
+ * 
+ *  *  [ Test Case #2 (50-Thread, 1000000-Log) ]
+ *  - async mode (5-Heap)
+ *   > Insertion time (async): 2.17s / 460,829LPS
+ *   > Write end time (async): 22.92s / 43,630LPS
+ * 
+ *  *  [ Test Case #3 (50-Thread, 1000000-Log) ]
+ *  - async mode (2-Heap)
+ *   > Insertion time (async): 3.07s / 324,675LPS
+ *   > Write end time (async): 19.765s / 50,594LPS
+ */
+
+ // @@ 다음: Writer의 Watcher 스래드 미사용시 죽여놓는 로직을 추가합시다.
+ // @@ 로그출력 파일명 작성되는 부분 수정합시다
+ // @@ 코드 날로짠부분 정리합시다.
 
 public class KsLogger {
     // [Class private variables]
@@ -67,7 +90,9 @@ public class KsLogger {
 
     // [Static initializer]
     static {
-        loggerManagementMap = new ConcurrentHashMap<String, KsLogger>();
+        if (loggerManagementMap == null) {
+            loggerManagementMap = new ConcurrentHashMap<String, KsLogger>();
+        }
     }
 
     // [Class public constants]

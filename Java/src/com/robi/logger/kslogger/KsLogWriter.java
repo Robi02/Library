@@ -72,11 +72,16 @@ public class KsLogWriter {
 
                 try {
                     if ((logMsg = logStorage.getLogFromStorage()) == null) {
-                        if (curTime - this.lastWriteTime > 1000) {
-                            Thread.sleep(1); // prevent watcher thread's overdrive
-                        }
+                        long idleTime = curTime - this.lastWriteTime;
 
-                        continue;
+                        if (idleTime > 10000L) {
+                            this.running = false; // 10sec no log -> destory watcher thread
+                            continue;
+                        }
+                        else if (idleTime > 1000L) {
+                            Thread.sleep(1); // prevent watcher thread's overdrive
+                            continue;
+                        }
                     }
 
                     this.lastWriteTime = curTime;
